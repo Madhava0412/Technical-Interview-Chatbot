@@ -29,7 +29,7 @@ An AI-powered technical interviewer to help prepare for coding interviews. This 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Madhava0412/technical-interview-chatbot.git
+   git clone https://github.com/Madhava0412/Technical-Interview-Chatbot.git
    cd technical-interview-chatbot
    ```
 
