@@ -2,7 +2,6 @@
 
 An AI-powered technical interviewer to help prepare for coding interviews. This application simulates a technical interview experience using Microsoft's Phi-3 model to ask relevant questions based on your selected technology stack and experience level.
 
-![Technical Interview Chatbot](https://github.com/yourusername/technical-interview-chatbot/raw/main/screenshot.png)
 
 ## Features
 
@@ -30,7 +29,7 @@ An AI-powered technical interviewer to help prepare for coding interviews. This 
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/technical-interview-chatbot.git
+   git clone https://github.com/Madhava0412/technical-interview-chatbot.git
    cd technical-interview-chatbot
    ```
 
