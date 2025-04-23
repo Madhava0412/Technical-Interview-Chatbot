@@ -36,14 +36,27 @@ def generate_response(model, tokenizer, prompt):
     # Decode the output
     decoded = tokenizer.decode(outputs[0], skip_special_tokens=True)
     
-    # Clean up the response by removing the prompt if it's included
+    # More robust way to extract the model's response
     if prompt in decoded:
-        response = decoded.replace(prompt, "").strip()
+        # Find where the prompt ends and the response begins
+        response_start = decoded.find(prompt) + len(prompt)
+        response = decoded[response_start:].strip()
     else:
-        # Get just the model's response, not the original prompt
-        response = decoded.split("\n\n")[-1].strip()
+        # Try to find a response separator or take the last part
+        parts = decoded.split("\n\n")
+        if len(parts) > 1:
+            # Take the last meaningful part
+            response = parts[-1].strip()
+        else:
+            # If no clear division, just take everything after the first line
+            lines = decoded.split("\n")
+            if len(lines) > 1:
+                response = "\n".join(lines[1:]).strip()
+            else:
+                # Just use the entire output if nothing else works
+                response = decoded.strip()
     
-    # Clean up the response - remove redundant newlines and spaces
+    # Clean up the response
     response = re.sub(r'\n{3,}', '\n\n', response)
     response = re.sub(r'\s{3,}', ' ', response)
     

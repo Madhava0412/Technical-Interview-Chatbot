@@ -7,7 +7,8 @@ from prompts import (
     create_error_recovery_prompt,
     create_clarification_prompt,
     create_follow_up_prompt,
-    create_interview_conclusion_prompt
+    create_interview_conclusion_prompt,
+    detect_nonsensical_input
 )
 from output import generate_response
 
@@ -27,6 +28,12 @@ if 'interview_started' not in st.session_state:
     st.session_state.interview_started = False
 if 'model_loaded' not in st.session_state:
     st.session_state.model_loaded = False
+if 'user_input' not in st.session_state:
+    st.session_state.user_input = ""
+if 'clarification_input' not in st.session_state:
+    st.session_state.clarification_input = ""
+if 'error_input' not in st.session_state:
+    st.session_state.error_input = ""
 
 # Tech stack dictionary organized by categories
 TECH_STACK_CATEGORIES = {
@@ -127,18 +134,17 @@ def load_model():
         model_name,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
         low_cpu_mem_usage=True,
-        device_map=device if device == "cuda" else None  # Let the model choose device map for GPU
+        device_map="auto" if device == "cuda" else None  # Fixed device map setting
     )
     
     tokenizer = AutoTokenizer.from_pretrained(
         model_name,
         use_fast=True
     )
-    tokenizer.pad_token = tokenizer.eos_token
     
-    # Ensure model is on the correct device
-    if device == "cuda":
-        model = model.cuda()
+    # Ensure we have a pad token
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     
     # Display device information
     if device == "cuda":
@@ -165,7 +171,7 @@ class TechnicalInterviewer:
         
     def start_interview(self):
         prompt = create_technical_question_prompt(
-            skill_level=f"{self.candidate_skill_level} with {self.years_of_experience}",
+            skill_level=f"{self.candidate_skill_level} with {self.years_of_experience}", 
             tech_stack=self.tech_stack
         )
         response = self.generate_response(prompt)
@@ -176,12 +182,20 @@ class TechnicalInterviewer:
         # Record candidate's response first
         self.conversation_history.append({"role": "candidate", "content": candidate_response})
         
-        # Then generate follow-up question based on candidate's response
-        prompt = create_follow_up_prompt(
-            conversation_history=self.conversation_history,
-            candidate_response=candidate_response,
-            skill_level=f"{self.candidate_skill_level} with {self.years_of_experience}"
-        )
+        # Check if response is nonsensical and handle accordingly
+        if detect_nonsensical_input(candidate_response):
+            prompt = create_clarification_prompt(
+                unclear_response=candidate_response,
+                topic=self.tech_stack
+            )
+        else:
+            # Generate follow-up question based on candidate's response
+            prompt = create_follow_up_prompt(
+                conversation_history=self.conversation_history,
+                candidate_response=candidate_response,
+                skill_level=f"{self.candidate_skill_level} with {self.years_of_experience}"
+            )
+            
         response = self.generate_response(prompt)
         
         # Add interviewer's follow-up question to conversation history
@@ -232,7 +246,7 @@ class TechnicalInterviewer:
         return generate_response(
             model=self.model,
             tokenizer=self.tokenizer,
-            prompt=prompt,
+            prompt=prompt
         )
     
     def evaluate_tech_stack_knowledge(self):
@@ -243,6 +257,12 @@ class TechnicalInterviewer:
         response = self.generate_response(prompt)
         return response
     
+# Function to clear input fields
+def clear_input():
+    st.session_state.user_input = ""
+    st.session_state.clarification_input = ""
+    st.session_state.error_input = ""
+
 # Main app
 def main():
     st.title("🤖 Technical Interview Chatbot")
@@ -255,12 +275,15 @@ def main():
         if not st.session_state.model_loaded:
             if st.button("Load Model"):
                 with st.spinner("Loading model... This may take a few minutes."):
-                    model, tokenizer, device = load_model()
-                    st.session_state.model = model
-                    st.session_state.tokenizer = tokenizer
-                    st.session_state.model_loaded = True
-                    st.session_state.device = device
-                    st.success("Model loaded successfully!")
+                    try:
+                        model, tokenizer, device = load_model()
+                        st.session_state.model = model
+                        st.session_state.tokenizer = tokenizer
+                        st.session_state.device = device
+                        st.session_state.model_loaded = True
+                        st.success("Model loaded successfully!")
+                    except Exception as e:
+                        st.error(f"Error loading model: {str(e)}")
         
         if st.session_state.model_loaded:
             st.subheader("Interview Settings")
@@ -310,24 +333,33 @@ def main():
             else:
                 st.warning("Please select at least one technology")
             
-            if st.button("Start Interview") and not st.session_state.interview_started and len(tech_stack) > 0:
-                st.session_state.interviewer = TechnicalInterviewer(st.session_state.model, st.session_state.tokenizer, st.session_state.device)
+            start_button = st.button("Start Interview")
+            if start_button and not st.session_state.interview_started and len(tech_stack) > 0:
+                st.session_state.interviewer = TechnicalInterviewer(
+                    st.session_state.model, 
+                    st.session_state.tokenizer, 
+                    st.session_state.device
+                )
                 st.session_state.interviewer.set_candidate_context(skill_level, tech_stack, years_of_experience)
                 
                 # Start the interview
-                first_question = st.session_state.interviewer.start_interview()
-                st.session_state.conversation_history.extend(st.session_state.interviewer.conversation_history)
+                with st.spinner("Starting interview..."):
+                    first_question = st.session_state.interviewer.start_interview()
+                st.session_state.conversation_history = st.session_state.interviewer.conversation_history.copy()
                 st.session_state.interview_started = True
+                st.experimental_rerun()
             
             if st.session_state.interview_started:
                 st.warning("Interview in progress")
                 if st.button("End Interview"):
-                    conclusion = st.session_state.interviewer.conclude_interview()
-                    st.session_state.conversation_history.append({"role": "interviewer", "content": conclusion})
-                    evaluation = st.session_state.interviewer.evaluate_tech_stack_knowledge()
-                    st.session_state.conversation_history.append({"role": "evaluation", "content": evaluation})
+                    with st.spinner("Concluding interview..."):
+                        conclusion = st.session_state.interviewer.conclude_interview()
+                        st.session_state.conversation_history.append({"role": "interviewer", "content": conclusion})
+                        evaluation = st.session_state.interviewer.evaluate_tech_stack_knowledge()
+                        st.session_state.conversation_history.append({"role": "evaluation", "content": evaluation})
                     st.session_state.interview_started = False
                     st.success("Interview concluded!")
+                    st.experimental_rerun()
     
     # Main chat interface
     st.subheader("💬 Interview Chat")
@@ -351,7 +383,11 @@ def main():
         col1, col2 = st.columns([6, 1])
         
         with col1:
-            user_input = st.text_input("Your response:", key="user_input")
+            user_input = st.text_input(
+                "Your response:", 
+                key="user_input",
+                on_change=None
+            )
         
         with col2:
             if st.button("Send"):
@@ -360,7 +396,8 @@ def main():
                     with st.spinner("Generating response..."):
                         response = st.session_state.interviewer.ask_follow_up(user_input)
                         st.session_state.conversation_history = st.session_state.interviewer.conversation_history.copy()
-                    st.rerun()
+                    clear_input()
+                    st.experimental_rerun()
         
         # Special actions
         st.markdown("---")
@@ -368,29 +405,31 @@ def main():
         col3, col4, col5 = st.columns(3)
         
         with col3:
-            clarification_input = st.text_input("Unclear response:")
+            clarification_input = st.text_input("Unclear response:", key="clarification_input")
             if st.button("Request Clarification"):
                 if clarification_input:
                     with st.spinner("Generating clarification request..."):
                         response = st.session_state.interviewer.request_clarification(clarification_input)
                         st.session_state.conversation_history = st.session_state.interviewer.conversation_history.copy()
-                    st.rerun()
+                    clear_input()
+                    st.experimental_rerun()
         
         with col4:
-            error_input = st.text_input("Error description:")
+            error_input = st.text_input("Error description:", key="error_input")
             if st.button("Report Error"):
                 if error_input:
                     with st.spinner("Generating error recovery response..."):
                         response = st.session_state.interviewer.handle_error(error_input)
                         st.session_state.conversation_history = st.session_state.interviewer.conversation_history.copy()
-                    st.rerun()
+                    clear_input()
+                    st.experimental_rerun()
         
         with col5:
             if st.button("Evaluate Tech Stack"):
                 with st.spinner("Evaluating tech stack knowledge..."):
                     evaluation = st.session_state.interviewer.evaluate_tech_stack_knowledge()
                     st.session_state.conversation_history.append({"role": "evaluation", "content": evaluation})
-                st.rerun()
+                st.experimental_rerun()
     
     # Footer
     st.markdown("---")
